@@ -9,6 +9,8 @@ import (
 	"os"
 	"runtime"
 	"time"
+	"gsyncd/index"
+	"encoding/json"
 )
 
 func main() {
@@ -75,9 +77,12 @@ func startWork(ip string, port int, key string, monitored string) {
 					//TODO: rm -rf monitored + dirPath
 					continue
 				}
-				if dirStatus == "deleted" {
-					//TODO: mkdir -p monitored + dirPath
-					//os.MkdirAll()
+				mode, _ := dirMap["FileMode"].(json.Number)
+				dirMode, _ := mode.Int64()
+				dir := index.PathSafe(index.SlashSuffix(monitored) + dirPath)
+				err := os.MkdirAll(dir, os.FileMode(dirMode))
+				if err != nil {
+					fmt.Println(err)
 				}
 				files := filesFromServer(ip, port, key, dirPath, lastIndexed)
 				if len(files) > 0 {
@@ -89,6 +94,7 @@ func startWork(ip string, port int, key string, monitored string) {
 							//TODO: rm -rf monitored + dirPath
 							continue
 						}
+						fmt.Println(filePath)
 					}
 				}
 			}

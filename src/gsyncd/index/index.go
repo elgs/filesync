@@ -76,7 +76,7 @@ func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
 	SET LAST_MODIFIED=?,FILE_MODE=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
 	defer psUpdateFileStatus.Close()
 
-	psUpdateFileStatus.Exec(info.ModTime().Unix(), info.Mode(), time.Now().Unix(), SlashSuffix(thePath[len(monitored):]))
+	psUpdateFileStatus.Exec(info.ModTime().Unix(), info.Mode().Perm(), time.Now().Unix(), SlashSuffix(thePath[len(monitored):]))
 }
 
 func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
@@ -130,7 +130,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	if err == sql.ErrNoRows {
 		insert = true
 	}
-	if !insert && info.ModTime().Unix() == file.LastModified && info.Size() == file.FileSize && info.Mode() == file.FileMode && file.Status != "deleted" {
+	if !insert && info.ModTime().Unix() == file.LastModified && info.Size() == file.FileSize && info.Mode().Perm() == file.FileMode && file.Status != "deleted" {
 		// file unchanged
 		fmt.Println(file.FilePath + " unchanged.")
 		return
@@ -138,9 +138,9 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 
 	// now we think file has been changed
 	if insert {
-		psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), info.Size(), info.Mode(), "updating", time.Now().Unix())
+		psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), info.Size(), info.Mode().Perm(), "updating", time.Now().Unix())
 	} else {
-		psUpdateFiles.Exec(info.ModTime().Unix(), info.Size(), info.Mode(), "updating", time.Now().Unix(), thePath[len(monitored):])
+		psUpdateFiles.Exec(info.ModTime().Unix(), info.Size(), info.Mode().Perm(), "updating", time.Now().Unix(), thePath[len(monitored):])
 	}
 
 	blocks := int(math.Ceil(float64(info.Size()) / float64(BLOCK_SIZE)))
@@ -198,9 +198,9 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			psDeleteFileParts.Exec(thePath[len(monitored):], i)
 		}
 	}
-	psUpdateFileStatus.Exec(info.Mode(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
+	psUpdateFileStatus.Exec(info.Mode().Perm(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
 	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
-	psUpdateFileStatus.Exec(parentDirInfo.Mode(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
 
 }
 
@@ -242,10 +242,10 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 				watcher.Watch(thePath[0 : len(thePath) - 1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
-					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, info.Mode(), "ready", time.Now().Unix())
+					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
 				} else {
 					if v.Status != "ready" {
-						psUpdateFiles.Exec(info.Mode(), info.ModTime().Unix(), time.Now().Unix(), v.FilePath)
+						psUpdateFiles.Exec(info.Mode().Perm(), info.ModTime().Unix(), time.Now().Unix(), v.FilePath)
 					}
 				}
 			} else {
