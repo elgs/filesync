@@ -2,29 +2,33 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
-	"runtime"
 	simplejson "github.com/bitly/go-simplejson"
-	"os"
+	"io/ioutil"
 	"net/http"
+	"net/url"
+	"os"
+	"runtime"
 	"time"
 )
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 	fmt.Println("CPUs: ", runtime.NumCPU())
-	done := make(chan bool)
 	input := args()
+	done := make(chan bool)
 	if len(input) >= 1 {
-		start(input[0])
+		start(input[0], done)
 	}
 	<-done
 }
 
-func start(configFile string) {
+func start(configFile string, done chan bool) {
 	b, err := ioutil.ReadFile(configFile)
 	if err != nil {
 		fmt.Println(configFile, " not found")
+		go func() {
+			done <- false
+		}()
 		return
 	}
 	json, _ := simplejson.NewJson(b)
@@ -35,7 +39,7 @@ func start(configFile string) {
 
 	for k, v := range monitors {
 		monitored, _ := v.(string)
-		go updateDirs(ip, port, k, monitored)
+		go startWork(ip, port, k, monitored)
 	}
 }
 func args() []string {
@@ -50,37 +54,56 @@ func args() []string {
 	return ret
 }
 
-func updateDirs(ip string, port int, key string, monitored string) {
-	lastIndexed := int64(0)
+func startWork(ip string, port int, key string, monitored string) {
+	var lastIndexed int64 = 0
 	sleepTime := time.Second
 	for {
-		client := &http.Client{}
-		req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port, "/dirs?last_indexed=", lastIndexed), nil)
-		req.Header.Add("AUTH_KEY", key)
-		resp, _ := client.Do(req)
-		defer resp.Body.Close()
-		body, _ := ioutil.ReadAll(resp.Body)
-		json, _ := simplejson.NewJson(body)
-		dirs := json.MustArray()
+		serverIndexed := timeFromServer(ip, port, key)
+		dirs := dirsFromServer(ip, port, key, lastIndexed)
 		if len(dirs) == 0 {
-			sleepTime *=2
+			sleepTime *= 2
 			if sleepTime >= time.Minute {
 				sleepTime = time.Minute
 			}
 		} else {
 			sleepTime = time.Second
-			for i, v := range dirs {
-				fmt.Println(i, v)
+			for _, dir := range dirs {
+				dirMap, _ := dir.(map[string]interface{})
+				filePath, _ := dirMap["FilePath"].(string)
+				files := filesFromServer(ip, port, key, filePath, lastIndexed)
+				if len(files) > 0 {
+					fmt.Println(files)
+				}
 			}
 		}
-		fmt.Println(sleepTime)
-		lastIndexed = timeFromServer(ip, port, key)
+		lastIndexed = serverIndexed
 		time.Sleep(sleepTime)
 	}
 }
 
-func dirsFromServer(ip string, port int, key string) []map[string]interface{} {
-	return nil
+func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
+			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+	req.Header.Add("AUTH_KEY", key)
+	resp, _ := client.Do(req)
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	json, _ := simplejson.NewJson(body)
+	files := json.MustArray()
+	return files
+}
+
+func dirsFromServer(ip string, port int, key string, lastIndexed int64) []interface{} {
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port, "/dirs?last_indexed=", lastIndexed), nil)
+	req.Header.Add("AUTH_KEY", key)
+	resp, _ := client.Do(req)
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	json, _ := simplejson.NewJson(body)
+	dirs := json.MustArray()
+	return dirs
 }
 
 func timeFromServer(ip string, port int, key string) int64 {
