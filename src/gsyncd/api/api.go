@@ -53,7 +53,7 @@ func RunWeb(ip string, port int, monitors map[string]interface{}) {
 			defer rows.Close()
 			for rows.Next() {
 				file := new(index.IndexedFile)
-				rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.Status, &file.LastIndexed)
+				rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.FileMode, &file.Status, &file.LastIndexed)
 				result = append(result, *file)
 			}
 			return http.StatusOK, encoder.Must(enc.Encode(result))
@@ -68,17 +68,13 @@ func RunWeb(ip string, port int, monitors map[string]interface{}) {
 			db, _ := sql.Open("sqlite3", index.SlashSuffix(monitored)+".sync/index.db")
 			defer db.Close()
 			psSelectFiles, _ := db.Prepare(`SELECT * FROM FILES
-				WHERE LAST_INDEXED>? AND (
-					(FILE_PATH LIKE ? AND FILE_PATH NOT LIKE ?) OR
-					(FILE_PATH LIKE ? AND FILE_PATH NOT LIKE ?)
-				)`)
+				WHERE LAST_INDEXED>? AND FILE_SIZE>=0 AND FILE_PATH LIKE ? AND FILE_PATH NOT LIKE ?`)
 			defer psSelectFiles.Close()
-			rows, _ := psSelectFiles.Query(lastIndexed, filePath+"%/",
-					filePath+"%/%/", filePath+"%", filePath+"%/%")
+			rows, _ := psSelectFiles.Query(lastIndexed, filePath+"%", filePath+"%/%")
 			defer rows.Close()
 			for rows.Next() {
 				file := new(index.IndexedFile)
-				rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.Status, &file.LastIndexed)
+				rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.FileMode, &file.Status, &file.LastIndexed)
 				result = append(result, *file)
 			}
 			return http.StatusOK, encoder.Must(enc.Encode(result))

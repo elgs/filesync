@@ -17,6 +17,7 @@ type IndexedFile struct {
 	FilePath     string
 	LastModified int64
 	FileSize     int64
+	FileMode     os.FileMode
 	Status       string
 	LastIndexed  int64
 }
@@ -72,10 +73,10 @@ func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
 	defer db.Close()
 
 	psUpdateFileStatus, _ := db.Prepare(`UPDATE FILES
-	SET LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
+	SET LAST_MODIFIED=?,FILE_MODE=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
 	defer psUpdateFileStatus.Close()
 
-	psUpdateFileStatus.Exec(info.ModTime().Unix(), time.Now().Unix(), SlashSuffix(thePath[len(monitored):]))
+	psUpdateFileStatus.Exec(info.ModTime().Unix(), info.Mode(), time.Now().Unix(), SlashSuffix(thePath[len(monitored):]))
 }
 
 func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
@@ -95,17 +96,17 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	defer psSelectFileParts.Close()
 
 	psInsertFiles, _ := db.Prepare(`INSERT INTO FILES
-	(FILE_PATH,LAST_MODIFIED,FILE_SIZE,STATUS,LAST_INDEXED)
-	VALUES(?,?,?,?,?)`)
+	(FILE_PATH,LAST_MODIFIED,FILE_SIZE,FILE_MODE,STATUS,LAST_INDEXED)
+	VALUES(?,?,?,?,?,?)`)
 	defer psInsertFiles.Close()
 
 	psUpdateFiles, _ := db.Prepare(`UPDATE FILES
-	SET LAST_MODIFIED=?,FILE_SIZE=?,STATUS=?,LAST_INDEXED=?
+	SET LAST_MODIFIED=?,FILE_SIZE=?,FILE_MODE=?,STATUS=?,LAST_INDEXED=?
 	WHERE FILE_PATH=?`)
 	defer psUpdateFiles.Close()
 
 	psUpdateFileStatus, _ := db.Prepare(`UPDATE FILES
-	SET STATUS=?,LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
+	SET FILE_MODE=?,STATUS=?,LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
 	defer psUpdateFileStatus.Close()
 
 	psInsertFileParts, _ := db.Prepare(`INSERT INTO FILE_PARTS
@@ -124,11 +125,12 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 
 	insert := false
 	file := new(IndexedFile)
-	err := psSelectFile.QueryRow(thePath[len(monitored):]).Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.Status, &file.LastIndexed)
+	err := psSelectFile.QueryRow(thePath[len(monitored):]).Scan(&file.FilePath, &file.LastModified,
+		&file.FileSize, &file.FileMode, &file.Status, &file.LastIndexed)
 	if err == sql.ErrNoRows {
 		insert = true
 	}
-	if !insert && info.ModTime().Unix() == file.LastModified && info.Size() == file.FileSize && file.Status != "deleted" {
+	if !insert && info.ModTime().Unix() == file.LastModified && info.Size() == file.FileSize && info.Mode() == file.FileMode && file.Status != "deleted" {
 		// file unchanged
 		fmt.Println(file.FilePath + " unchanged.")
 		return
@@ -136,9 +138,9 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 
 	// now we think file has been changed
 	if insert {
-		psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), info.Size(), "updating", time.Now().Unix())
+		psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), info.Size(), info.Mode(), "updating", time.Now().Unix())
 	} else {
-		psUpdateFiles.Exec(info.ModTime().Unix(), info.Size(), "updating", time.Now().Unix(), thePath[len(monitored):])
+		psUpdateFiles.Exec(info.ModTime().Unix(), info.Size(), info.Mode(), "updating", time.Now().Unix(), thePath[len(monitored):])
 	}
 
 	blocks := int(math.Ceil(float64(info.Size()) / float64(BLOCK_SIZE)))
@@ -196,8 +198,9 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			psDeleteFileParts.Exec(thePath[len(monitored):], i)
 		}
 	}
-	psUpdateFileStatus.Exec("ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
-	psUpdateFileStatus.Exec("ready", info.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
+	psUpdateFileStatus.Exec(info.Mode(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
+	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
 
 }
 
@@ -214,16 +217,16 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 	defer rows.Close()
 	for rows.Next() {
 		file := new(IndexedFile)
-		rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.Status, &file.LastIndexed)
+		rows.Scan(&file.FilePath, &file.LastModified, &file.FileSize, &file.FileMode, &file.Status, &file.LastIndexed)
 		mapFiles[file.FilePath] = *file
 	}
 	psInsertFiles, _ := db.Prepare(`INSERT INTO FILES
-	(FILE_PATH,LAST_MODIFIED,FILE_SIZE,STATUS,LAST_INDEXED)
-	VALUES(?,?,?,?,?)`)
+	(FILE_PATH,LAST_MODIFIED,FILE_SIZE,FILE_MODE,STATUS,LAST_INDEXED)
+	VALUES(?,?,?,?,?,?)`)
 	defer psInsertFiles.Close()
 
 	psUpdateFiles, _ := db.Prepare(`UPDATE FILES
-	SET STATUS='ready',LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
+	SET FILE_MODE=?,STATUS='ready',LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
 	defer psUpdateFiles.Close()
 
 	filepath.Walk(safeRoot,
@@ -239,10 +242,10 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 				watcher.Watch(thePath[0 : len(thePath) - 1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
-					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, "ready", time.Now().Unix())
+					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, info.Mode(), "ready", time.Now().Unix())
 				} else {
 					if v.Status != "ready" {
-						psUpdateFiles.Exec(info.ModTime().Unix(), time.Now().Unix(), v.FilePath)
+						psUpdateFiles.Exec(info.Mode(), info.ModTime().Unix(), time.Now().Unix(), v.FilePath)
 					}
 				}
 			} else {
@@ -304,6 +307,7 @@ func InitIndex(monitored string, db *sql.DB) error {
 				FILE_PATH TEXT PRIMARY KEY,
 				LAST_MODIFIED INTEGER NOT NULL,
 				FILE_SIZE INTEGER NOT NULL,
+				FILE_MODE INTEGER NOT NULL,
 				STATUS TEXT NOT NULL,
 				LAST_INDEXED INTEGER NOT NULL
 			);

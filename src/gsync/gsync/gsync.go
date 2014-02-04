@@ -69,16 +69,46 @@ func startWork(ip string, port int, key string, monitored string) {
 			sleepTime = time.Second
 			for _, dir := range dirs {
 				dirMap, _ := dir.(map[string]interface{})
-				filePath, _ := dirMap["FilePath"].(string)
-				files := filesFromServer(ip, port, key, filePath, lastIndexed)
+				dirPath, _ := dirMap["FilePath"].(string)
+				dirStatus := dirMap["Status"].(string)
+				if dirStatus == "deleted" {
+					//TODO: rm -rf monitored + dirPath
+					continue
+				}
+				if dirStatus == "deleted" {
+					//TODO: mkdir -p monitored + dirPath
+					//os.MkdirAll()
+				}
+				files := filesFromServer(ip, port, key, dirPath, lastIndexed)
 				if len(files) > 0 {
-					fmt.Println(files)
+					for _, file := range files {
+						fileMap, _ := file.(map[string] interface{})
+						filePath, _ := fileMap["FilePath"].(string)
+						fileStatus := fileMap["Status"].(string)
+						if fileStatus == "deleted" {
+							//TODO: rm -rf monitored + dirPath
+							continue
+						}
+					}
 				}
 			}
 		}
 		lastIndexed = serverIndexed
 		time.Sleep(sleepTime)
 	}
+}
+
+func filePartsFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
+			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+	req.Header.Add("AUTH_KEY", key)
+	resp, _ := client.Do(req)
+	defer resp.Body.Close()
+	body, _ := ioutil.ReadAll(resp.Body)
+	json, _ := simplejson.NewJson(body)
+	files := json.MustArray()
+	return files
 }
 
 func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
