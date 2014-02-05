@@ -41,7 +41,7 @@ func start(configFile string, done chan bool) {
 
 	for k, v := range monitors {
 		monitored, _ := v.(string)
-		go startWork(ip, port, k, monitored)
+		go startWork(ip, port, k, monitored, time.Second*10)
 	}
 }
 func args() []string {
@@ -56,7 +56,7 @@ func args() []string {
 	return ret
 }
 
-func startWork(ip string, port int, key string, monitored string) {
+func startWork(ip string, port int, key string, monitored string, maxInterval time.Duration) {
 	var lastIndexed int64 = 0
 	sleepTime := time.Second
 	for {
@@ -64,8 +64,8 @@ func startWork(ip string, port int, key string, monitored string) {
 		dirs := dirsFromServer(ip, port, key, lastIndexed)
 		if len(dirs) == 0 {
 			sleepTime *= 2
-			if sleepTime >= time.Minute {
-				sleepTime = time.Minute
+			if sleepTime >= maxInterval {
+				sleepTime = maxInterval
 			}
 		} else {
 			sleepTime = time.Second
@@ -73,13 +73,13 @@ func startWork(ip string, port int, key string, monitored string) {
 				dirMap, _ := dir.(map[string]interface{})
 				dirPath, _ := dirMap["FilePath"].(string)
 				dirStatus := dirMap["Status"].(string)
+				dir := index.PathSafe(index.SlashSuffix(monitored) + dirPath)
 				if dirStatus == "deleted" {
-					//TODO: rm -rf monitored + dirPath
+					os.RemoveAll(dir)
 					continue
 				}
 				mode, _ := dirMap["FileMode"].(json.Number)
 				dirMode, _ := mode.Int64()
-				dir := index.PathSafe(index.SlashSuffix(monitored) + dirPath)
 				err := os.MkdirAll(dir, os.FileMode(dirMode))
 				if err != nil {
 					fmt.Println(err)
@@ -90,8 +90,9 @@ func startWork(ip string, port int, key string, monitored string) {
 						fileMap, _ := file.(map[string] interface{})
 						filePath, _ := fileMap["FilePath"].(string)
 						fileStatus := fileMap["Status"].(string)
+						file := index.PathSafe(index.SlashSuffix(monitored) + filePath)
 						if fileStatus == "deleted" {
-							//TODO: rm -rf monitored + dirPath
+							os.RemoveAll(file)
 							continue
 						}
 						fmt.Println(filePath)
