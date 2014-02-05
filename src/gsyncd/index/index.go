@@ -65,9 +65,10 @@ func ProcessFileDelete(thePath string, monitored string) {
 	psUpdateFiles.Exec("deleted", time.Now().Unix(), pathDir)
 	psDeleteFilesSub.Exec(pathDir+"%", pathDir)
 
-	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
-	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
-
+	parentDirInfo, err := os.Lstat(filepath.Dir(thePath))
+	if err != nil {
+		psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
+	}
 }
 
 func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
@@ -190,7 +191,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			// part changed
 			fp.Checksum = v
 			fp.ChecksumType = "CRC32"
-			fp.StartIndex = int64(i) * BLOCK_SIZE
+			fp.StartIndex = int64(i)*BLOCK_SIZE
 			fp.Offset = n
 			fp.FilePath = thePath[len(monitored):]
 			fp.Seq = i
@@ -209,9 +210,10 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 		}
 	}
 	psUpdateFileStatus.Exec(info.Mode().Perm(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
-	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
-	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
-
+	parentDirInfo, err := os.Lstat(filepath.Dir(thePath))
+	if err != nil {
+		psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
+	}
 }
 
 func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) error {
@@ -248,7 +250,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 					return nil
 				}
 
-				watcher.Watch(thePath[0 : len(thePath)-1])
+				watcher.Watch(thePath[0 : len(thePath) - 1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
 					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
