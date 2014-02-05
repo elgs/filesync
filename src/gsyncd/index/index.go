@@ -66,7 +66,7 @@ func ProcessFileDelete(thePath string, monitored string) {
 	psDeleteFilesSub.Exec(pathDir+"%", pathDir)
 
 	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
-	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
 
 }
 
@@ -88,6 +88,7 @@ func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
 }
 
 func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
+	fmt.Println(thePath,"changed")
 	if info == nil {
 		fmt.Println("File no longer exists: " + thePath)
 		return
@@ -209,7 +210,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	}
 	psUpdateFileStatus.Exec(info.Mode().Perm(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
 	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
-	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
 
 }
 
@@ -240,10 +241,9 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 
 	filepath.Walk(safeRoot,
 		(filepath.WalkFunc)(func(path string, info os.FileInfo, err error) error {
-			//fmt.Println("Walking to: " + path)
 			var thePath string
 			if info.IsDir() {
-				thePath = SlashSuffix(path)
+				thePath = SlashSuffix(PathSafe(path))
 				if strings.HasPrefix(thePath, SlashSuffix(safeRoot)+".sync/") {
 					return nil
 				}
@@ -259,7 +259,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 				}
 			} else {
 				thePath = PathSafe(path)
-				if strings.HasPrefix(filepath.Dir(thePath), SlashSuffix(safeRoot)+".sync") {
+				if strings.HasPrefix(PathSafe(filepath.Dir(thePath)), SlashSuffix(safeRoot)+".sync") {
 					return nil
 				}
 				ProcessFileChange(thePath, info, monitored)
@@ -287,7 +287,7 @@ func SlashSuffix(path string) string {
 }
 func PathSafe(path string) string {
 	path = regexp.MustCompile("\\\\+").ReplaceAllString(path, "/")
-	path, _ = filepath.Abs(path)
+	//path, _ = filepath.Abs(path)
 	return path
 }
 func LikeSafe(path string) string {
