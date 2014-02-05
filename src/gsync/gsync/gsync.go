@@ -12,6 +12,7 @@ import (
 	"gsyncd/index"
 	"encoding/json"
 	"io"
+	"hash/crc32"
 )
 
 func main() {
@@ -86,28 +87,64 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 					fmt.Println(err)
 				}
 				files := filesFromServer(ip, port, key, dirPath, lastIndexed)
-				if len(files) > 0 {
-					for _, file := range files {
-						fileMap, _ := file.(map[string] interface{})
-						filePath, _ := fileMap["FilePath"].(string)
-						fileStatus := fileMap["Status"].(string)
-						size, _ := fileMap["FileSize"].(json.Number)
-						fileSize, _ := size.Int64()
-						file := index.PathSafe(index.SlashSuffix(monitored) + filePath)
-						if fileStatus == "deleted" {
-							os.RemoveAll(file)
+				if len(files) == 0 {
+					continue
+				}
+				for _, file := range files {
+					fileMap, _ := file.(map[string] interface{})
+					filePath, _ := fileMap["FilePath"].(string)
+					fileStatus := fileMap["Status"].(string)
+
+					file := index.PathSafe(index.SlashSuffix(monitored) + filePath)
+					if fileStatus == "deleted" {
+						os.RemoveAll(file)
+						continue
+					}
+					size, _ := fileMap["FileSize"].(json.Number)
+					fileSize, _ := size.Int64()
+					if info, err := os.Stat(file); os.IsNotExist(err) {
+						// file does not exists, downloaded
+						out, _ := os.Create(file)
+						defer out.Close()
+						downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
+					} else {
+						// file exists, analyze it
+						modified, _ := fileMap["LastModified"].(json.Number)
+						lastModified, _ := modified.Int64()
+						if fileSize == info.Size() && lastModified == info.ModTime().Unix() {
+							// this file is probably not changed
 							continue
 						}
-						if _, err := os.Stat(file); os.IsNotExist(err) {
-							// file does not exists, downloaded
-							out, _ := os.Create(file)
-							defer out.Close()
-							downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
-						} else {
-							// file exists, analayze it
-
+						// file change, analyse it block by block
+						fileParts := filePartsFromServer(ip, port, key, filePath)
+						out, _ := os.OpenFile(file, os.O_RDWR, os.FileMode(0666))
+						defer out.Close()
+						out.Truncate(fileSize)
+						if len(fileParts) == 0 {
+							continue
 						}
+						h := crc32.NewIEEE()
+						for _, filePart := range fileParts {
+							filePartMap, _ := filePart.(map[string] interface{})
+							idx, _ := filePartMap["StartIndex"].(json.Number)
+							startIndex, _ := idx.Int64()
+							ost, _ := filePartMap["Offset"].(json.Number)
+							offset, _ := ost.Int64()
+							checksum := filePartMap["Checksum"].(string)
 
+							buf := make([]byte, offset)
+							n, _ := out.ReadAt(buf, startIndex)
+
+							h.Reset()
+							h.Write(buf[:n])
+							v := fmt.Sprint(h.Sum32())
+							if checksum == v {
+								// block unchanged
+								continue
+							}
+							// block changed
+							downloadFromServer(ip, port, key, filePath, startIndex, offset, out)
+						}
 					}
 				}
 			}
@@ -117,27 +154,29 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 	}
 }
 
-func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) {
+func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) int64 {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
 			"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
-	io.CopyN(file, resp.Body, length)
+	file.Seek(start, os.SEEK_SET)
+	n, _ := io.CopyN(file, resp.Body, length)
+	return n
 }
 
-func filePartsFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
+func filePartsFromServer(ip string, port int, key string, filePath string) []interface{} {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+			"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
 	body, _ := ioutil.ReadAll(resp.Body)
 	json, _ := simplejson.NewJson(body)
-	files := json.MustArray()
-	return files
+	fileParts := json.MustArray()
+	return fileParts
 }
 
 func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {

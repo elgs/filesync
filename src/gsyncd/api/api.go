@@ -106,13 +106,12 @@ func RunWeb(ip string, port int, monitors map[string]interface{}) {
 			start, _ := strconv.ParseInt(req.FormValue("start"), 10, 64)
 			length, _ := strconv.ParseInt(req.FormValue("length"), 10, 64)
 
-			res.Header().Set("Content-Type", "application/octet-stream")
-			res.Header().Set("Content-Length", strconv.FormatInt(length, 10))
-
 			file, _ := os.Open(index.SlashSuffix(monitored) + filePath)
 			defer file.Close()
 			file.Seek(start, os.SEEK_SET)
-			io.CopyN(res, file, length)
+			n, _ := io.CopyN(res, file, length)
+			res.Header().Set("Content-Length", strconv.FormatInt(n, 10))
+			res.Header().Set("Content-Type", "application/octet-stream")
 		})
 
 	m.Action(route.Handle)

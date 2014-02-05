@@ -53,6 +53,10 @@ func ProcessFileDelete(thePath string, monitored string) {
 	psDeleteFilesSub, _ := db.Prepare(`DELETE FROM FILES WHERE FILE_PATH LIKE ? AND FILE_PATH!=?`)
 	defer psDeleteFilesSub.Close()
 
+	psUpdateFileStatus, _ := db.Prepare(`UPDATE FILES
+	SET FILE_MODE=?,LAST_MODIFIED=?,LAST_INDEXED=? WHERE FILE_PATH=?`)
+	defer psUpdateFileStatus.Close()
+
 	psDeleteFileParts.Exec(thePath[len(monitored):])
 	psDeleteFilePartsSub.Exec(thePath[len(monitored):] + "/%")
 
@@ -60,6 +64,10 @@ func ProcessFileDelete(thePath string, monitored string) {
 	pathDir := SlashSuffix(thePath[len(monitored):])
 	psUpdateFiles.Exec("deleted", time.Now().Unix(), pathDir)
 	psDeleteFilesSub.Exec(pathDir+"%", pathDir)
+
+	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(filepath.Dir(thePath)[len(monitored):]))
+
 }
 
 func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
@@ -157,6 +165,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 		sliceFileParts = append(sliceFileParts, *filePart)
 	}
 
+	h := crc32.NewIEEE()
 	for i := 0; i < blocks; i++ {
 		var fp IndexedFilePart
 		insertFP := false
@@ -172,7 +181,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 		buf := make([]byte, BLOCK_SIZE)
 		n, _ := file.ReadAt(buf, int64(i)*BLOCK_SIZE)
 
-		h := crc32.NewIEEE()
+		h.Reset()
 		h.Write(buf[:n])
 		v := fmt.Sprint(h.Sum32())
 
