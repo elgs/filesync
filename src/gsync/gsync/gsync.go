@@ -11,6 +11,7 @@ import (
 	"time"
 	"gsyncd/index"
 	"encoding/json"
+	"io"
 )
 
 func main() {
@@ -90,12 +91,23 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 						fileMap, _ := file.(map[string] interface{})
 						filePath, _ := fileMap["FilePath"].(string)
 						fileStatus := fileMap["Status"].(string)
+						size, _ := fileMap["FileSize"].(json.Number)
+						fileSize, _ := size.Int64()
 						file := index.PathSafe(index.SlashSuffix(monitored) + filePath)
 						if fileStatus == "deleted" {
 							os.RemoveAll(file)
 							continue
 						}
-						fmt.Println(filePath)
+						if _, err := os.Stat(file); os.IsNotExist(err) {
+							// file does not exists, downloaded
+							out, _ := os.Create(file)
+							defer out.Close()
+							downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
+						} else {
+							// file exists, analayze it
+
+						}
+
 					}
 				}
 			}
@@ -103,6 +115,16 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 		lastIndexed = serverIndexed
 		time.Sleep(sleepTime)
 	}
+}
+
+func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) {
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
+			"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
+	req.Header.Add("AUTH_KEY", key)
+	resp, _ := client.Do(req)
+	defer resp.Body.Close()
+	io.CopyN(file, resp.Body, length)
 }
 
 func filePartsFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
