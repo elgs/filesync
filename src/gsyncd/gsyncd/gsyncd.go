@@ -4,13 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 	simplejson "github.com/bitly/go-simplejson"
-	"gsyncd/index"
 	"github.com/howeyc/fsnotify"
 	_ "github.com/mattn/go-sqlite3"
+	"gsyncd/api"
+	"gsyncd/index"
 	"io/ioutil"
 	"os"
 	"runtime"
-	"gsyncd/api"
 )
 
 func main() {

@@ -1,18 +1,18 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	simplejson "github.com/bitly/go-simplejson"
+	"gsyncd/index"
+	"hash/crc32"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
 	"runtime"
 	"time"
-	"gsyncd/index"
-	"encoding/json"
-	"io"
-	"hash/crc32"
 )
 
 func main() {
@@ -43,7 +43,7 @@ func start(configFile string, done chan bool) {
 
 	for k, v := range monitors {
 		monitored, _ := v.(string)
-		go startWork(ip, port, k, monitored, time.Second*10)
+		go startWork(ip, port, k, monitored, time.Second*1)
 	}
 }
 func args() []string {
@@ -77,7 +77,10 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 				dirStatus := dirMap["Status"].(string)
 				dir := index.PathSafe(index.SlashSuffix(monitored) + dirPath)
 				if dirStatus == "deleted" {
-					os.RemoveAll(dir)
+					err := os.RemoveAll(dir)
+					if err != nil {
+						fmt.Println(err)
+					}
 					continue
 				}
 				mode, _ := dirMap["FileMode"].(json.Number)
@@ -91,22 +94,27 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 					continue
 				}
 				for _, file := range files {
-					fileMap, _ := file.(map[string] interface{})
+					fileMap, _ := file.(map[string]interface{})
 					filePath, _ := fileMap["FilePath"].(string)
 					fileStatus := fileMap["Status"].(string)
 
-					file := index.PathSafe(index.SlashSuffix(monitored) + filePath)
+					f := index.PathSafe(index.SlashSuffix(monitored) + filePath)
 					if fileStatus == "deleted" {
-						os.RemoveAll(file)
+						err := os.RemoveAll(f)
+						if err != nil {
+							fmt.Println(err)
+						}
 						continue
 					}
 					size, _ := fileMap["FileSize"].(json.Number)
 					fileSize, _ := size.Int64()
-					if info, err := os.Stat(file); os.IsNotExist(err) {
+					if info, err := os.Stat(f); os.IsNotExist(err) {
 						// file does not exists, downloaded
-						out, _ := os.Create(file)
-						defer out.Close()
-						downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
+						func() {
+							out, _ := os.Create(f)
+							defer out.Close()
+							downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
+						}()
 					} else {
 						// file exists, analyze it
 						modified, _ := fileMap["LastModified"].(json.Number)
@@ -117,34 +125,36 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 						}
 						// file change, analyse it block by block
 						fileParts := filePartsFromServer(ip, port, key, filePath)
-						out, _ := os.OpenFile(file, os.O_RDWR, os.FileMode(0666))
-						defer out.Close()
-						out.Truncate(fileSize)
-						if len(fileParts) == 0 {
-							continue
-						}
-						h := crc32.NewIEEE()
-						for _, filePart := range fileParts {
-							filePartMap, _ := filePart.(map[string] interface{})
-							idx, _ := filePartMap["StartIndex"].(json.Number)
-							startIndex, _ := idx.Int64()
-							ost, _ := filePartMap["Offset"].(json.Number)
-							offset, _ := ost.Int64()
-							checksum := filePartMap["Checksum"].(string)
-
-							buf := make([]byte, offset)
-							n, _ := out.ReadAt(buf, startIndex)
-
-							h.Reset()
-							h.Write(buf[:n])
-							v := fmt.Sprint(h.Sum32())
-							if checksum == v {
-								// block unchanged
-								continue
+						func() {
+							out, _ := os.OpenFile(f, os.O_RDWR, os.FileMode(0666))
+							defer out.Close()
+							out.Truncate(fileSize)
+							if len(fileParts) == 0 {
+								return
 							}
-							// block changed
-							downloadFromServer(ip, port, key, filePath, startIndex, offset, out)
-						}
+							h := crc32.NewIEEE()
+							for _, filePart := range fileParts {
+								filePartMap, _ := filePart.(map[string]interface{})
+								idx, _ := filePartMap["StartIndex"].(json.Number)
+								startIndex, _ := idx.Int64()
+								ost, _ := filePartMap["Offset"].(json.Number)
+								offset, _ := ost.Int64()
+								checksum := filePartMap["Checksum"].(string)
+
+								buf := make([]byte, offset)
+								n, _ := out.ReadAt(buf, startIndex)
+
+								h.Reset()
+								h.Write(buf[:n])
+								v := fmt.Sprint(h.Sum32())
+								if checksum == v {
+									// block unchanged
+									return
+								}
+								// block changed
+								downloadFromServer(ip, port, key, filePath, startIndex, offset, out)
+							}
+						}()
 					}
 				}
 			}
@@ -157,7 +167,7 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) int64 {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
+		"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -169,7 +179,7 @@ func downloadFromServer(ip string, port int, key string, filePath string, start 
 func filePartsFromServer(ip string, port int, key string, filePath string) []interface{} {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
+		"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -182,7 +192,7 @@ func filePartsFromServer(ip string, port int, key string, filePath string) []int
 func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+		"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()

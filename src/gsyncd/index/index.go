@@ -88,7 +88,7 @@ func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
 }
 
 func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
-	fmt.Println(thePath,"changed")
+	fmt.Println(thePath, "changed")
 	if info == nil {
 		fmt.Println("File no longer exists: " + thePath)
 		return
@@ -167,6 +167,8 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	}
 
 	h := crc32.NewIEEE()
+	f, _ := os.Open(thePath)
+	defer f.Close()
 	for i := 0; i < blocks; i++ {
 		var fp IndexedFilePart
 		insertFP := false
@@ -177,10 +179,8 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			insertFP = true
 		}
 
-		file, _ := os.Open(thePath)
-		defer file.Close()
 		buf := make([]byte, BLOCK_SIZE)
-		n, _ := file.ReadAt(buf, int64(i)*BLOCK_SIZE)
+		n, _ := f.ReadAt(buf, int64(i)*BLOCK_SIZE)
 
 		h.Reset()
 		h.Write(buf[:n])
@@ -190,7 +190,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			// part changed
 			fp.Checksum = v
 			fp.ChecksumType = "CRC32"
-			fp.StartIndex = int64(i)*BLOCK_SIZE
+			fp.StartIndex = int64(i) * BLOCK_SIZE
 			fp.Offset = n
 			fp.FilePath = thePath[len(monitored):]
 			fp.Seq = i
@@ -248,7 +248,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 					return nil
 				}
 
-				watcher.Watch(thePath[0 : len(thePath) - 1])
+				watcher.Watch(thePath[0 : len(thePath)-1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
 					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
