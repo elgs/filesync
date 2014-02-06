@@ -43,7 +43,7 @@ func start(configFile string, done chan bool) {
 
 	for k, v := range monitors {
 		monitored, _ := v.(string)
-		go startWork(ip, port, k, monitored, time.Second*10)
+		go startWork(ip, port, k, monitored, time.Minute)
 	}
 }
 func args() []string {
@@ -72,7 +72,7 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 			}
 		}
 		changed = false
-		fmt.Println("Sleep", sleepTime, lastIndexed)
+		//fmt.Println("Sleep", sleepTime, lastIndexed)
 		time.Sleep(sleepTime)
 		dirs := dirsFromServer(ip, port, key, lastIndexed-3600)
 		if len(dirs) > 0 {
@@ -120,7 +120,6 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 				if info, err := os.Stat(f); os.IsNotExist(err) {
 					// file does not exists, download it
 					changed = true
-					fmt.Println("TRUE 1")
 					func() {
 						out, _ := os.Create(f)
 						defer out.Close()
@@ -136,7 +135,6 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 					}
 					// file change, analyse it block by block
 					changed = true
-					fmt.Println("TRUE 2")
 					fileParts := filePartsFromServer(ip, port, key, filePath)
 					func() {
 						out, _ := os.OpenFile(f, os.O_RDWR, os.FileMode(0666))
@@ -175,9 +173,14 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 }
 
 func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) int64 {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
+		"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -187,9 +190,14 @@ func downloadFromServer(ip string, port int, key string, filePath string, start 
 }
 
 func filePartsFromServer(ip string, port int, key string, filePath string) []interface{} {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
+		"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -200,9 +208,14 @@ func filePartsFromServer(ip string, port int, key string, filePath string) []int
 }
 
 func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+		"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -213,6 +226,11 @@ func filesFromServer(ip string, port int, key string, filePath string, lastIndex
 }
 
 func dirsFromServer(ip string, port int, key string, lastIndexed int64) []interface{} {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port, "/dirs?last_indexed=", lastIndexed), nil)
 	req.Header.Add("AUTH_KEY", key)

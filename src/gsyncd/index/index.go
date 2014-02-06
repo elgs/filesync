@@ -36,6 +36,11 @@ const (
 )
 
 func ProcessFileDelete(thePath string, monitored string) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	thePath = PathSafe(thePath)
 
 	db, _ := sql.Open("sqlite3", SlashSuffix(monitored)+".sync/index.db")
@@ -65,10 +70,8 @@ func ProcessFileDelete(thePath string, monitored string) {
 	psUpdateFiles.Exec("deleted", time.Now().Unix(), pathDir)
 	psDeleteFilesSub.Exec(pathDir+"%", pathDir)
 
-	parentDirInfo, err := os.Lstat(filepath.Dir(thePath))
-	if err != nil {
-		psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
-	}
+	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
 }
 
 func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
@@ -89,7 +92,11 @@ func ProcessDirChange(thePath string, info os.FileInfo, monitored string) {
 }
 
 func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
-	fmt.Println(thePath, "changed")
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
+		}
+	}()
 	if info == nil {
 		fmt.Println("File no longer exists: " + thePath)
 		return
@@ -141,7 +148,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	}
 	if !insert && info.ModTime().Unix() == file.LastModified && info.Size() == file.FileSize && info.Mode().Perm() == file.FileMode && file.Status != "deleted" {
 		// file unchanged
-		fmt.Println(file.FilePath + " unchanged.")
+		//fmt.Println(file.FilePath + " unchanged.")
 		return
 	}
 
@@ -190,7 +197,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 			// part changed
 			fp.Checksum = v
 			fp.ChecksumType = "CRC32"
-			fp.StartIndex = int64(i)*BLOCK_SIZE
+			fp.StartIndex = int64(i) * BLOCK_SIZE
 			fp.Offset = n
 			fp.FilePath = thePath[len(monitored):]
 			fp.Seq = i
@@ -209,10 +216,8 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 		}
 	}
 	psUpdateFileStatus.Exec(info.Mode().Perm(), "ready", info.ModTime().Unix(), time.Now().Unix(), thePath[len(monitored):])
-	parentDirInfo, err := os.Lstat(filepath.Dir(thePath))
-	if err != nil {
-		psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
-	}
+	parentDirInfo, _ := os.Lstat(filepath.Dir(thePath))
+	psUpdateFileStatus.Exec(parentDirInfo.Mode().Perm(), "ready", parentDirInfo.ModTime().Unix(), time.Now().Unix(), SlashSuffix(PathSafe(filepath.Dir(thePath))[len(monitored):]))
 }
 
 func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) error {
@@ -249,7 +254,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 					return nil
 				}
 
-				watcher.Watch(thePath[0 : len(thePath) - 1])
+				watcher.Watch(thePath[0 : len(thePath)-1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
 					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
@@ -371,6 +376,9 @@ func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 			}
 		case err := <-watcher.Error:
 			fmt.Println("error:", err)
+		case <-time.After(time.Minute):
+			//fmt.Println("I'm idle, so I decided to do a patrol")
+			WatchRecursively(watcher, monitored, monitored)
 		}
 	}
 }
