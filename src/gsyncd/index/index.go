@@ -303,7 +303,7 @@ func LikeSafe(path string) string {
 
 func InitIndex(monitored string, db *sql.DB) error {
 	var ret error = nil
-	exists, _ := exists(SlashSuffix(monitored) + ".sync/index.db")
+	exists := exists(SlashSuffix(monitored) + ".sync/index.db")
 	if !exists {
 		os.MkdirAll(SlashSuffix(monitored)+".sync/", (os.FileMode)(0755))
 		db.Exec(`
@@ -335,22 +335,22 @@ func InitIndex(monitored string, db *sql.DB) error {
 }
 
 // exists returns whether the given file or directory exists or not
-func exists(path string) (bool, error) {
+func exists(path string) bool {
 	_, err := os.Stat(path)
 	if err == nil {
-		return true, nil
+		return true
 	}
 	if os.IsNotExist(err) {
-		return false, nil
+		return false
 	}
-	return false, err
+	return false
 }
 
 func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 	for {
 		select {
 		case ev := <-watcher.Event:
-			fmt.Println("event:", ev, ":", monitored)
+			//fmt.Println("event:", ev, ":", monitored)
 			info, _ := os.Lstat(ev.Name)
 			if info == nil {
 				ProcessFileDelete(ev.Name, monitored)
@@ -370,9 +370,21 @@ func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 					ProcessFileChange(ev.Name, info, monitored)
 					//fmt.Println("Modified file: " + ev.Name)
 				}
-			} else if ev.IsDelete() || ev.IsRename() {
+			} else if ev.IsDelete() {
 				ProcessFileDelete(ev.Name, monitored)
 				//fmt.Println("Deleted: " + ev.Name)
+			} else if ev.IsRename() {
+				if exists(ev.Name) {
+					if info.IsDir() {
+						WatchRecursively(watcher, ev.Name, monitored)
+						//fmt.Println("Created dir: " + ev.Name)
+					} else {
+						ProcessFileChange(ev.Name, info, monitored)
+						//fmt.Println("Created file: " + ev.Name)
+					}
+				} else {
+					ProcessFileDelete(ev.Name, monitored)
+				}
 			}
 		case err := <-watcher.Error:
 			fmt.Println("error:", err)
