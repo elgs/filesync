@@ -43,7 +43,7 @@ func start(configFile string, done chan bool) {
 
 	for k, v := range monitors {
 		monitored, _ := v.(string)
-		go startWork(ip, port, k, monitored, time.Second*1)
+		go startWork(ip, port, k, monitored, time.Second*10)
 	}
 }
 func args() []string {
@@ -62,15 +62,10 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 	var lastIndexed int64 = 0
 	sleepTime := time.Second
 	for {
-		serverIndexed := timeFromServer(ip, port, key)
-		dirs := dirsFromServer(ip, port, key, lastIndexed)
-		if len(dirs) == 0 {
-			sleepTime *= 2
-			if sleepTime >= maxInterval {
-				sleepTime = maxInterval
-			}
-		} else {
-			sleepTime = time.Second
+		fmt.Println("Sleep", sleepTime)
+		time.Sleep(sleepTime)
+		dirs := dirsFromServer(ip, port, key, 0)
+		if len(dirs) > 0 {
 			for _, dir := range dirs {
 				dirMap, _ := dir.(map[string]interface{})
 				dirPath, _ := dirMap["FilePath"].(string)
@@ -89,85 +84,94 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 				if err != nil {
 					fmt.Println(err)
 				}
-				files := filesFromServer(ip, port, key, dirPath, lastIndexed)
-				if len(files) == 0 {
+			}
+
+			files := filesFromServer(ip, port, key, "/", lastIndexed)
+			if len(files) == 0 {
+				sleepTime *= 2
+				if sleepTime >= maxInterval {
+					sleepTime = maxInterval
+				}
+				continue
+			}
+			sleepTime = time.Second
+			for _, file := range files {
+				fileMap, _ := file.(map[string]interface{})
+				filePath, _ := fileMap["FilePath"].(string)
+				fileStatus := fileMap["Status"].(string)
+				indexed, _ := fileMap["LastIndexed"].(json.Number)
+				serverIndexed, _ := indexed.Int64()
+				if serverIndexed > lastIndexed {
+					lastIndexed = serverIndexed
+				}
+
+				f := index.PathSafe(index.SlashSuffix(monitored) + filePath)
+				if fileStatus == "deleted" {
+					err := os.RemoveAll(f)
+					if err != nil {
+						fmt.Println(err)
+					}
 					continue
 				}
-				for _, file := range files {
-					fileMap, _ := file.(map[string]interface{})
-					filePath, _ := fileMap["FilePath"].(string)
-					fileStatus := fileMap["Status"].(string)
-
-					f := index.PathSafe(index.SlashSuffix(monitored) + filePath)
-					if fileStatus == "deleted" {
-						err := os.RemoveAll(f)
-						if err != nil {
-							fmt.Println(err)
-						}
+				size, _ := fileMap["FileSize"].(json.Number)
+				fileSize, _ := size.Int64()
+				if info, err := os.Stat(f); os.IsNotExist(err) {
+					// file does not exists, download it
+					func() {
+						out, _ := os.Create(f)
+						defer out.Close()
+						downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
+					}()
+				} else {
+					// file exists, analyze it
+					modified, _ := fileMap["LastModified"].(json.Number)
+					lastModified, _ := modified.Int64()
+					if fileSize == info.Size() && lastModified == info.ModTime().Unix() {
+						// this file is probably not changed
 						continue
 					}
-					size, _ := fileMap["FileSize"].(json.Number)
-					fileSize, _ := size.Int64()
-					if info, err := os.Stat(f); os.IsNotExist(err) {
-						// file does not exists, downloaded
-						func() {
-							out, _ := os.Create(f)
-							defer out.Close()
-							downloadFromServer(ip, port, key, filePath, 0, fileSize, out)
-						}()
-					} else {
-						// file exists, analyze it
-						modified, _ := fileMap["LastModified"].(json.Number)
-						lastModified, _ := modified.Int64()
-						if fileSize == info.Size() && lastModified == info.ModTime().Unix() {
-							// this file is probably not changed
-							continue
+					// file change, analyse it block by block
+					fileParts := filePartsFromServer(ip, port, key, filePath)
+					func() {
+						out, _ := os.OpenFile(f, os.O_RDWR, os.FileMode(0666))
+						defer out.Close()
+						out.Truncate(fileSize)
+						if len(fileParts) == 0 {
+							return
 						}
-						// file change, analyse it block by block
-						fileParts := filePartsFromServer(ip, port, key, filePath)
-						func() {
-							out, _ := os.OpenFile(f, os.O_RDWR, os.FileMode(0666))
-							defer out.Close()
-							out.Truncate(fileSize)
-							if len(fileParts) == 0 {
+						h := crc32.NewIEEE()
+						for _, filePart := range fileParts {
+							filePartMap, _ := filePart.(map[string]interface{})
+							idx, _ := filePartMap["StartIndex"].(json.Number)
+							startIndex, _ := idx.Int64()
+							ost, _ := filePartMap["Offset"].(json.Number)
+							offset, _ := ost.Int64()
+							checksum := filePartMap["Checksum"].(string)
+
+							buf := make([]byte, offset)
+							n, _ := out.ReadAt(buf, startIndex)
+
+							h.Reset()
+							h.Write(buf[:n])
+							v := fmt.Sprint(h.Sum32())
+							if checksum == v {
+								// block unchanged
 								return
 							}
-							h := crc32.NewIEEE()
-							for _, filePart := range fileParts {
-								filePartMap, _ := filePart.(map[string]interface{})
-								idx, _ := filePartMap["StartIndex"].(json.Number)
-								startIndex, _ := idx.Int64()
-								ost, _ := filePartMap["Offset"].(json.Number)
-								offset, _ := ost.Int64()
-								checksum := filePartMap["Checksum"].(string)
-
-								buf := make([]byte, offset)
-								n, _ := out.ReadAt(buf, startIndex)
-
-								h.Reset()
-								h.Write(buf[:n])
-								v := fmt.Sprint(h.Sum32())
-								if checksum == v {
-									// block unchanged
-									return
-								}
-								// block changed
-								downloadFromServer(ip, port, key, filePath, startIndex, offset, out)
-							}
-						}()
-					}
+							// block changed
+							downloadFromServer(ip, port, key, filePath, startIndex, offset, out)
+						}
+					}()
 				}
 			}
 		}
-		lastIndexed = serverIndexed
-		time.Sleep(sleepTime)
 	}
 }
 
 func downloadFromServer(ip string, port int, key string, filePath string, start int64, length int64, file *os.File) int64 {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-		"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
+			"/download?&file_path=", url.QueryEscape(filePath), "&start=", start, "&length=", length), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -179,7 +183,7 @@ func downloadFromServer(ip string, port int, key string, filePath string, start 
 func filePartsFromServer(ip string, port int, key string, filePath string) []interface{} {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-		"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
+			"/file_parts?file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -192,7 +196,7 @@ func filePartsFromServer(ip string, port int, key string, filePath string) []int
 func filesFromServer(ip string, port int, key string, filePath string, lastIndexed int64) []interface{} {
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port,
-		"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
+			"/files?last_indexed=", lastIndexed, "&file_path=", url.QueryEscape(filePath)), nil)
 	req.Header.Add("AUTH_KEY", key)
 	resp, _ := client.Do(req)
 	defer resp.Body.Close()
@@ -212,16 +216,4 @@ func dirsFromServer(ip string, port int, key string, lastIndexed int64) []interf
 	json, _ := simplejson.NewJson(body)
 	dirs := json.MustArray()
 	return dirs
-}
-
-func timeFromServer(ip string, port int, key string) int64 {
-	client := &http.Client{}
-	req, _ := http.NewRequest("GET", fmt.Sprint("http://", ip, ":", port, "/time"), nil)
-	req.Header.Add("AUTH_KEY", key)
-	resp, _ := client.Do(req)
-	defer resp.Body.Close()
-	body, _ := ioutil.ReadAll(resp.Body)
-	json, _ := simplejson.NewJson(body)
-	currentTime := json.Get("current_time").MustInt64(0)
-	return currentTime
 }

@@ -129,8 +129,7 @@ func ProcessFileChange(thePath string, info os.FileInfo, monitored string) {
 	WHERE FILE_PATH=? AND SEQ=?`)
 	defer psUpdateFileParts.Close()
 
-	psDeleteFileParts, _ := db.Prepare(`DELETE FROM FILE_PARTS
-	WHERE FILE_PATH=? AND SEQ=?`)
+	psDeleteFileParts, _ := db.Prepare(`DELETE FROM FILE_PARTS WHERE FILE_PATH=? AND SEQ=?`)
 	defer psDeleteFileParts.Close()
 
 	insert := false
