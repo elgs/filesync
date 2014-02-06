@@ -60,11 +60,21 @@ func args() []string {
 
 func startWork(ip string, port int, key string, monitored string, maxInterval time.Duration) {
 	var lastIndexed int64 = 0
+	var changed bool = false
 	sleepTime := time.Second
 	for {
-		fmt.Println("Sleep", sleepTime)
+		if changed {
+			sleepTime = time.Second
+		} else {
+			sleepTime *= 2
+			if sleepTime >= maxInterval {
+				sleepTime = maxInterval
+			}
+		}
+		changed = false
+		fmt.Println("Sleep", sleepTime, lastIndexed)
 		time.Sleep(sleepTime)
-		dirs := dirsFromServer(ip, port, key, 0)
+		dirs := dirsFromServer(ip, port, key, lastIndexed-3600)
 		if len(dirs) > 0 {
 			for _, dir := range dirs {
 				dirMap, _ := dir.(map[string]interface{})
@@ -86,15 +96,7 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 				}
 			}
 
-			files := filesFromServer(ip, port, key, "/", lastIndexed)
-			if len(files) == 0 {
-				sleepTime *= 2
-				if sleepTime >= maxInterval {
-					sleepTime = maxInterval
-				}
-				continue
-			}
-			sleepTime = time.Second
+			files := filesFromServer(ip, port, key, "/", lastIndexed-3600)
 			for _, file := range files {
 				fileMap, _ := file.(map[string]interface{})
 				filePath, _ := fileMap["FilePath"].(string)
@@ -117,6 +119,8 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 				fileSize, _ := size.Int64()
 				if info, err := os.Stat(f); os.IsNotExist(err) {
 					// file does not exists, download it
+					changed = true
+					fmt.Println("TRUE 1")
 					func() {
 						out, _ := os.Create(f)
 						defer out.Close()
@@ -126,11 +130,13 @@ func startWork(ip string, port int, key string, monitored string, maxInterval ti
 					// file exists, analyze it
 					modified, _ := fileMap["LastModified"].(json.Number)
 					lastModified, _ := modified.Int64()
-					if fileSize == info.Size() && lastModified == info.ModTime().Unix() {
+					if fileSize == info.Size() && lastModified < info.ModTime().Unix() {
 						// this file is probably not changed
 						continue
 					}
 					// file change, analyse it block by block
+					changed = true
+					fmt.Println("TRUE 2")
 					fileParts := filePartsFromServer(ip, port, key, filePath)
 					func() {
 						out, _ := os.OpenFile(f, os.O_RDWR, os.FileMode(0666))
