@@ -32,7 +32,7 @@ Installtion
 `go get github.com/elgs/filesync/gsync`
 Run
 ---
-`gsync gsync.json
+`gsync gsync.json`
 Configuration
 ---
 gsync.json
