@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	simplejson "github.com/bitly/go-simplejson"
-	"github.com/elgs/gsyncd/index"
+	"github.com/elgs/filesync/index"
 	"hash/crc32"
 	"io"
 	"io/ioutil"
