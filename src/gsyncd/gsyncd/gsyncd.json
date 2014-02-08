@@ -1,8 +1,0 @@
-{
-    "ip": "0.0.0.0",
-    "port": 6776,
-    "monitors": {
-        "home_elgs_desktop_a": "/home/elgs/Desktop/a",
-        "home_elgs_desktop_b": "/home/elgs/Desktop/b"
-    }
-}
