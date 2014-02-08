@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"github.com/codegangsta/martini"
 	"github.com/codegangsta/martini-contrib/encoder"
-	"gsyncd/index"
+	"github.com/elgs/gsyncd/index"
 	"io"
 	"net/http"
 	"os"
