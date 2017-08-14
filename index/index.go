@@ -3,7 +3,7 @@ package index
 import (
 	"database/sql"
 	"fmt"
-	"github.com/howeyc/fsnotify"
+	"github.com/fsnotify/fsnotify"
 	"hash/crc32"
 	"math"
 	"os"
@@ -254,7 +254,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 					return nil
 				}
 
-				watcher.Watch(thePath[0 : len(thePath)-1])
+				watcher.Add(thePath[0: len(thePath)-1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
 					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
@@ -349,12 +349,12 @@ func exists(path string) bool {
 func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 	for {
 		select {
-		case ev := <-watcher.Event:
+		case ev := <-watcher.Events:
 			//fmt.Println("event:", ev, ":", monitored)
 			info, _ := os.Lstat(ev.Name)
 			if info == nil {
 				ProcessFileDelete(ev.Name, monitored)
-			} else if ev.IsCreate() {
+			} else if ev.Op&fsnotify.Create == fsnotify.Create {
 				if info.IsDir() {
 					WatchRecursively(watcher, ev.Name, monitored)
 					//fmt.Println("Created dir: " + ev.Name)
@@ -362,7 +362,7 @@ func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 					ProcessFileChange(ev.Name, info, monitored)
 					//fmt.Println("Created file: " + ev.Name)
 				}
-			} else if ev.IsModify() {
+			} else if ev.Op&fsnotify.Write == fsnotify.Write {
 				if info.IsDir() {
 					ProcessDirChange(ev.Name, info, monitored)
 					//fmt.Println("Modified dir: " + ev.Name)
@@ -370,10 +370,10 @@ func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 					ProcessFileChange(ev.Name, info, monitored)
 					//fmt.Println("Modified file: " + ev.Name)
 				}
-			} else if ev.IsDelete() {
+			} else if ev.Op&fsnotify.Remove == fsnotify.Remove {
 				ProcessFileDelete(ev.Name, monitored)
 				//fmt.Println("Deleted: " + ev.Name)
-			} else if ev.IsRename() {
+			} else if ev.Op&fsnotify.Rename == fsnotify.Rename {
 				if exists(ev.Name) {
 					if info.IsDir() {
 						WatchRecursively(watcher, ev.Name, monitored)
@@ -386,7 +386,7 @@ func ProcessEvent(watcher *fsnotify.Watcher, monitored string) {
 					ProcessFileDelete(ev.Name, monitored)
 				}
 			}
-		case err := <-watcher.Error:
+		case err := <-watcher.Errors:
 			fmt.Println("error:", err)
 		case <-time.After(time.Minute):
 			//fmt.Println("I'm idle, so I decided to do a patrol")

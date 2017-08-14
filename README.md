@@ -7,6 +7,7 @@ Server
 Installation
 ---
 `go get github.com/elgs/filesync/gsyncd`
+`go get github.com/elgs/filesync/gsync`
 Run
 ---
 `gsyncd gsyncd.json`
