@@ -14,6 +14,7 @@ Installation
 Run
 ---
 `gsyncd gsyncd.json`
+
 Configuration
 ---
 gsyncd.json
@@ -34,9 +35,11 @@ Client
 Installtion
 ---
 `go get github.com/elgs/filesync/gsync`
+
 Run
 ---
 `gsync gsync.json`
+
 Configuration
 ---
 gsync.json
