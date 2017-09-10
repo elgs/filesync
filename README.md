@@ -9,8 +9,6 @@ Installation
 
 `go get -u github.com/elgs/filesync/gsyncd`
 
-`go get -u github.com/elgs/filesync/gsync`
-
 Run
 ---
 `gsyncd gsyncd.json`
@@ -34,6 +32,7 @@ Client
 ===
 Installtion
 ---
+
 `go get github.com/elgs/filesync/gsync`
 
 Run

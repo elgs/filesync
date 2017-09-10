@@ -3,7 +3,6 @@ package index
 import (
 	"database/sql"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"hash/crc32"
 	"math"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 type IndexedFile struct {
@@ -246,7 +247,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 	defer psUpdateFiles.Close()
 
 	filepath.Walk(safeRoot,
-		(filepath.WalkFunc)(func(path string, info os.FileInfo, err error) error {
+		func(path string, info os.FileInfo, err error) error {
 			var thePath string
 			if info.IsDir() {
 				thePath = SlashSuffix(PathSafe(path))
@@ -254,7 +255,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 					return nil
 				}
 
-				watcher.Add(thePath[0: len(thePath)-1])
+				watcher.Add(thePath[0 : len(thePath)-1])
 				// update index
 				if v, ok := mapFiles[thePath[len(monitored):]]; !ok {
 					psInsertFiles.Exec(thePath[len(monitored):], info.ModTime().Unix(), -1, uint32(info.Mode().Perm()), "ready", time.Now().Unix())
@@ -272,7 +273,7 @@ func WatchRecursively(watcher *fsnotify.Watcher, root string, monitored string) 
 			}
 			delete(mapFiles, thePath[len(monitored):])
 			return nil
-		}))
+		})
 	// remove zombies
 	for k, v := range mapFiles {
 		if k != "/" && v.Status == "ready" {
